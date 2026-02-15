@@ -98,6 +98,7 @@ async def websocket_tokens(websocket: WebSocket):
             )
             speculator = Speculator(draft=_draft_model, target=target)
 
+            client_disconnected = False
             try:
                 async for event in speculator.generate(
                     prompt=request.prompt,
@@ -106,11 +107,31 @@ async def websocket_tokens(websocket: WebSocket):
                     k=request.k,
                 ):
                     event_data = event.model_dump()
-                    logger.info(f"Sending event: type={event_data.get('type')} round={event_data.get('round')}")
-                    await websocket.send_json(event_data)
+                    logger.info(
+                        f"Sending event: type={event_data.get('type')} round={event_data.get('round')}"
+                    )
+                    try:
+                        await websocket.send_json(event_data)
+                    except WebSocketDisconnect:
+                        logger.info(
+                            "Client disconnected during generation, stopping..."
+                        )
+                        client_disconnected = True
+                        break
+            except WebSocketDisconnect:
+                logger.info("Client disconnected during generation")
+                client_disconnected = True
             except Exception as e:
                 logger.exception(f"Generation error: {e}")
-                await websocket.send_json({"type": "error", "message": str(e)})
+                try:
+                    await websocket.send_json({"type": "error", "message": str(e)})
+                except WebSocketDisconnect:
+                    logger.info("Client disconnected while sending error")
+                    client_disconnected = True
+
+            # Break out of outer loop if client disconnected
+            if client_disconnected:
+                break
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")

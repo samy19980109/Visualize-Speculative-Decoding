@@ -2,11 +2,12 @@ import { useState } from 'react';
 
 interface PromptInputProps {
   onGenerate: (prompt: string, k: number, temperature: number, maxTokens: number) => void;
+  onStop: () => void;
   isGenerating: boolean;
   isConnected: boolean;
 }
 
-export function PromptInput({ onGenerate, isGenerating, isConnected }: PromptInputProps) {
+export function PromptInput({ onGenerate, onStop, isGenerating, isConnected }: PromptInputProps) {
   const [prompt, setPrompt] = useState('Explain how transformers work in machine learning.');
   const [k, setK] = useState(8);
   const [temperature, setTemperature] = useState(0.7);
@@ -93,24 +94,48 @@ export function PromptInput({ onGenerate, isGenerating, isConnected }: PromptInp
         </div>
       </div>
 
-      <button
-        onClick={handleSubmit}
-        disabled={isGenerating || !isConnected || !prompt.trim()}
-        style={{
-          padding: '10px 20px',
-          backgroundColor: isGenerating ? '#334155' : '#6366f1',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 8,
-          fontSize: 14,
-          fontWeight: 600,
-          cursor: isGenerating ? 'not-allowed' : 'pointer',
-          opacity: (!isConnected || !prompt.trim()) ? 0.5 : 1,
-          transition: 'background-color 200ms',
-        }}
-      >
-        {isGenerating ? 'Generating...' : 'Generate'}
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={handleSubmit}
+          disabled={isGenerating || !isConnected || !prompt.trim()}
+          style={{
+            flex: 1,
+            padding: '10px 20px',
+            backgroundColor: isGenerating ? '#334155' : '#6366f1',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: isGenerating ? 'not-allowed' : 'pointer',
+            opacity: (!isConnected || !prompt.trim()) ? 0.5 : 1,
+            transition: 'background-color 200ms',
+          }}
+        >
+          {isGenerating ? 'Generating...' : 'Generate'}
+        </button>
+        
+        {isGenerating && (
+          <button
+            onClick={onStop}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#ef4444',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background-color 200ms',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
+          >
+            Stop
+          </button>
+        )}
+      </div>
 
       {!isConnected && (
         <p style={{ fontSize: 12, color: '#f59e0b', margin: 0 }}>

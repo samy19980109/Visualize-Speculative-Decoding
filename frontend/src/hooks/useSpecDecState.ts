@@ -36,6 +36,7 @@ const initialState: SpecDecState = {
 
 type Action =
   | { type: 'START_GENERATION' }
+  | { type: 'STOP_GENERATION' }
   | { type: 'DRAFT_TOKEN'; event: ServerEvent & { type: 'draft_token' } }
   | { type: 'VERIFY_RESULT'; event: ServerEvent & { type: 'verify_result' } }
   | { type: 'METRICS_UPDATE'; event: ServerEvent & { type: 'metrics' } }
@@ -62,6 +63,9 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
   switch (action.type) {
     case 'START_GENERATION':
       return { ...initialState, isGenerating: true };
+
+    case 'STOP_GENERATION':
+      return { ...state, isGenerating: false };
 
     case 'DRAFT_TOKEN': {
       const e = action.event;
@@ -284,5 +288,9 @@ export function useSpecDecState() {
     dispatch({ type: 'START_GENERATION' });
   }, []);
 
-  return { state, handleEvent, startGeneration };
+  const stopGeneration = useCallback(() => {
+    dispatch({ type: 'STOP_GENERATION' });
+  }, []);
+
+  return { state, handleEvent, startGeneration, stopGeneration };
 }

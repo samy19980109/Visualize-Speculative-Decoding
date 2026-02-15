@@ -25,7 +25,7 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  const connectRef = useRef<() => void>();
 
   const connect = useCallback(() => {
     // Don't connect if unmounted or already open/connecting
@@ -62,7 +62,7 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
         setStatus('disconnected');
         wsRef.current = null;
         // Auto-reconnect after 3s
-        reconnectTimeout.current = setTimeout(connect, 3000);
+        reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 3000);
       }
     };
 
@@ -72,6 +72,14 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
 
     wsRef.current = ws;
   }, []);
+
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -103,5 +111,17 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
     );
   }, []);
 
-  return { status, send };
+  const close = useCallback(() => {
+    clearTimeout(reconnectTimeout.current);
+    if (wsRef.current) {
+      // Don't null out onclose - let it reconnect after we close
+      wsRef.current.close();
+      wsRef.current = null;
+      setStatus('disconnected');
+      // Trigger reconnect after a short delay
+      reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 1000);
+    }
+  }, []);
+
+  return { status, send, close };
 }

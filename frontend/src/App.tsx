@@ -8,8 +8,8 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { useSpecDecState } from './hooks/useSpecDecState';
 
 function App() {
-  const { state, handleEvent, startGeneration } = useSpecDecState();
-  const { status, send } = useWebSocket(handleEvent);
+  const { state, handleEvent, startGeneration, stopGeneration } = useSpecDecState();
+  const { status, send, close } = useWebSocket(handleEvent);
 
   const onGenerate = useCallback(
     (prompt: string, k: number, temperature: number, maxTokens: number) => {
@@ -19,11 +19,17 @@ function App() {
     [startGeneration, send]
   );
 
+  const onStop = useCallback(() => {
+    close();
+    stopGeneration();
+  }, [close, stopGeneration]);
+
   return (
     <Layout
       promptPanel={
         <PromptInput
           onGenerate={onGenerate}
+          onStop={onStop}
           isGenerating={state.isGenerating}
           isConnected={status === 'connected'}
         />
