@@ -43,6 +43,7 @@ class Speculator:
         # Build initial context
         logger.info("Applying chat template...")
         context_ids = self.draft.apply_chat_template(prompt)
+        prompt_text = self.draft.get_prompt_text(prompt)
         logger.info(f"Context has {len(context_ids)} tokens")
 
         generated_text_so_far = ""
@@ -51,9 +52,6 @@ class Speculator:
         ] = []  # Track token IDs directly to avoid tokenizer drift
         current_round = 0
         total_tokens_produced = 0
-
-        # Messages for target model API
-        messages = [{"role": "user", "content": prompt}]
 
         try:
             while total_tokens_produced < max_tokens:
@@ -105,21 +103,11 @@ class Speculator:
                     await asyncio.sleep(0.05)  # 50ms stagger for animation
 
                 # --- Phase 2: Verify via Cerebras API ---
+                # Use completions API with raw prompt text for reliable continuation
                 logger.info(f"Round {current_round}: Verifying via Cerebras API...")
-                verify_messages = list(messages)
-                if generated_text_so_far:
-                    verify_messages.append(
-                        {
-                            "role": "assistant",
-                            "content": generated_text_so_far,
-                        }
-                    )
-                logger.info(f"  VERIFY MESSAGES: {verify_messages}")
-
-                draft_strs = [dt.token_str for dt in draft_tokens]
+                full_prompt_text = prompt_text + generated_text_so_far
                 verification = await self.target.verify_tokens(
-                    messages=verify_messages,
-                    draft_tokens=draft_strs,
+                    prompt_text=full_prompt_text,
                     k=k,
                 )
                 logger.info(
@@ -212,17 +200,17 @@ class Speculator:
                                     f"    ACCEPTED token '{comp.final_token}' ID={comp.final_token_id}"
                                 )
                             elif comp.status == TokenStatus.RESAMPLED:
-                                # For resampled tokens, tokenize to get ID
+                                # For resampled tokens, tokenize to get ALL IDs
+                                # (target token may map to multiple draft token IDs)
                                 resampled_ids = self.draft.tokenize(comp.final_token)
                                 if resampled_ids:
-                                    token_ids_this_round.append(resampled_ids[0])
+                                    token_ids_this_round.extend(resampled_ids)
                                     logger.info(
-                                        f"    RESAMPLED token '{comp.final_token}' ID={resampled_ids[0]}"
+                                        f"    RESAMPLED token '{comp.final_token}' IDs={resampled_ids}"
                                     )
                                 else:
-                                    token_ids_this_round.append(0)  # Fallback
-                                    logger.info(
-                                        f"    RESAMPLED token '{comp.final_token}' ID=0 (fallback)"
+                                    logger.warning(
+                                        f"    RESAMPLED token '{comp.final_token}' produced no IDs"
                                     )
                         else:
                             logger.info(
@@ -235,9 +223,11 @@ class Speculator:
                     # Tokenize bonus token to get ID
                     bonus_ids = self.draft.tokenize(round_result.bonus_token)
                     if bonus_ids:
-                        token_ids_this_round.append(bonus_ids[0])
+                        token_ids_this_round.extend(bonus_ids)
                     else:
-                        token_ids_this_round.append(0)  # Fallback
+                        logger.warning(
+                            f"    BONUS token '{round_result.bonus_token}' produced no IDs"
+                        )
 
                     yield VerifyResultEvent(
                         round=current_round,
@@ -253,20 +243,11 @@ class Speculator:
                         verify_time_ms=verification.elapsed_ms,
                     )
 
-                # Update generated context (track both string and token IDs)
-                # Join tokens with spaces when needed - tokens may or may not have leading whitespace
-                for token in tokens_this_round:
-                    if (
-                        token.strip()
-                        and generated_text_so_far
-                        and not generated_text_so_far.endswith(" ")
-                        and not token.startswith(" ")
-                    ):
-                        generated_text_so_far += " " + token
-                    else:
-                        generated_text_so_far += token
+                # Update generated context — reconstruct text from token IDs
+                # to avoid spacing/drift issues with manual string concatenation
                 generated_token_ids.extend(token_ids_this_round)
                 total_tokens_produced += len(tokens_this_round)
+                generated_text_so_far = self.draft.decode(generated_token_ids)
 
                 # DEBUG: Log what was added to context
                 logger.info(f"  ADDED tokens_this_round: {tokens_this_round}")

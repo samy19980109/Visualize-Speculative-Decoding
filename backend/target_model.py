@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import math
+import time
 from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,61 +40,67 @@ class TargetModel:
 
     async def verify_tokens(
         self,
-        messages: list[dict],
-        draft_tokens: list[str],
+        prompt_text: str,
         k: int,
     ) -> VerificationResult:
-        """Send context + draft tokens to Cerebras for batch verification.
+        """Verify draft tokens by generating K+1 tokens from the target model.
 
-        We ask the target model to generate K+1 tokens from the same context,
-        with logprobs enabled, so we can compare its distribution against the
-        draft model's choices.
+        Uses the /v1/completions endpoint (not chat) to send the raw prompt
+        text including the chat template. This ensures the target model
+        continues from exactly the right position, avoiding issues with
+        assistant message prefilling not being supported.
 
         Args:
-            messages: Chat messages (system + user + assistant context so far).
-            draft_tokens: The K draft token strings to verify.
-            k: Number of draft tokens (len(draft_tokens)).
+            prompt_text: Full raw text (chat template + generated text so far).
+            k: Number of draft tokens to verify.
 
         Returns:
             VerificationResult with per-position logprob info.
         """
-        import time
-
         t0 = time.perf_counter()
 
-        # Build the prompt: context up to where drafting started,
-        # then let the target freely generate K+1 tokens
-        response = await self.client.chat.completions.create(
+        logger.info(f"  TARGET prompt ends with: {repr(prompt_text[-80:])}")
+
+        response = await self.client.completions.create(
             model=self.model,
-            messages=messages,
-            logprobs=True,
-            top_logprobs=20,
-            max_completion_tokens=k + 1,
-            temperature=0.01,  # Near-greedy; Cerebras requires >0 with top_logprobs
+            prompt=prompt_text,
+            logprobs=20,
+            max_tokens=k + 1,
+            temperature=0.01,  # Near-greedy; Cerebras requires >0 with logprobs
         )
 
         elapsed = (time.perf_counter() - t0) * 1000
 
         positions: list[TargetTokenInfo] = []
-        content_logprobs = response.choices[0].logprobs.content
+        logprobs_data = response.choices[0].logprobs
 
-        for lp_entry in content_logprobs:
-            # Build top logprobs map
-            top_lp_map: dict[str, float] = {}
-            for tlp in lp_entry.top_logprobs:
-                top_lp_map[tlp.token] = tlp.logprob
+        if logprobs_data and logprobs_data.tokens:
+            for i in range(len(logprobs_data.tokens)):
+                token_str = logprobs_data.tokens[i]
+                token_logprob = (
+                    logprobs_data.token_logprobs[i]
+                    if logprobs_data.token_logprobs[i] is not None
+                    else 0.0
+                )
+                top_lp_map = (
+                    dict(logprobs_data.top_logprobs[i])
+                    if logprobs_data.top_logprobs and logprobs_data.top_logprobs[i]
+                    else {}
+                )
 
-            # Approximate entropy from top-20 logprobs
-            entropy = _approx_entropy_from_top_logprobs(
-                [tlp.logprob for tlp in lp_entry.top_logprobs]
-            )
+                entropy = _approx_entropy_from_top_logprobs(list(top_lp_map.values()))
 
-            positions.append(TargetTokenInfo(
-                token_str=lp_entry.token,
-                token_logprob=lp_entry.logprob,
-                top_logprobs=top_lp_map,
-                entropy=entropy,
-            ))
+                positions.append(TargetTokenInfo(
+                    token_str=token_str,
+                    token_logprob=token_logprob,
+                    top_logprobs=top_lp_map,
+                    entropy=entropy,
+                ))
+
+        logger.info(
+            f"  TARGET returned {len(positions)} positions: "
+            f"{[p.token_str for p in positions[:5]]}..."
+        )
 
         return VerificationResult(positions=positions, elapsed_ms=elapsed)
 

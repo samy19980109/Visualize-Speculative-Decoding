@@ -80,7 +80,11 @@ class DraftModel:
 
             token_str = self.tokenizer.decode([token_id])
 
-            # logprobs_arr is full-vocabulary log-probabilities
+            # Normalize to proper log-probabilities (log-softmax).
+            # generate_step may return logits in some mlx-lm versions;
+            # this is a no-op when already normalized.
+            logprobs_arr = logprobs_arr - mx.logsumexp(logprobs_arr)
+
             logprob = logprobs_arr[token_id].item()
 
             # Shannon entropy: H = -sum(p * log(p))
@@ -107,6 +111,13 @@ class DraftModel:
             ))
 
         return drafts
+
+    def get_prompt_text(self, prompt: str) -> str:
+        """Get the raw chat template text (not tokenized) for use with completions API."""
+        messages = [{"role": "user", "content": prompt}]
+        return self.tokenizer.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=False
+        )
 
     def tokenize(self, text: str) -> list[int]:
         """Tokenize text into token IDs (no special tokens like BOS)."""
