@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "speculatoviz"
+version = "0.1.0"
+description = "Real-time visualization of speculative decoding with MLX + Cerebras"
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-lm>=0.21",
+    "mlx>=0.22",
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    "openai>=1.50",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+    "websockets>=12.0",
+]
+
+[project.scripts]
+speculatoviz = "backend.main:run"
