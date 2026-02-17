@@ -166,9 +166,14 @@ The better the draft model approximates the target, the higher the acceptance ra
 │  │  └─ PromptInput.tsx   │                            │  ├─ schemas.py   │  │
 │  │     K, temp, tokens   │                            │  │  Pydantic      │  │
 │  │                       │                            │  │                │  │
-│  │  Hooks:               │                            │  └─ config.py    │  │
-│  │  ├ useWebSocket       │                            │     .env loading  │  │
-│  │  └ useSpecDecState    │                            │                   │  │
+│  │  Hooks:               │                            │  ├─ interfaces.py│  │
+│  │  ├ useWebSocket       │                            │  │  DI protocols  │  │
+│  │  └ useSpecDecState    │                            │  │                │  │
+│  │                       │                            │  └─ config.py    │  │
+│  │  Lib:                 │                            │     .env + cache  │  │
+│  │  ├ camelCase.ts       │                            │                   │  │
+│  │  ├ styles.ts          │                            │  Tests:           │  │
+│  │  └ treeUtils.ts       │                            │  └ test_speculator│  │
 │  └───────────────────────┘                            └─────────┬─────────┘  │
 │                                                                 │            │
 │                                                    ┌────────────┴──────────┐ │
@@ -350,6 +355,9 @@ curl http://localhost:8000/api/health
 # Test draft model independently
 curl http://localhost:8000/api/test-draft
 # → Generates a few tokens to verify MLX is working
+
+# Run unit tests (no GPU/MLX required — uses stub models)
+pytest backend/tests/ -v
 ```
 
 ---
@@ -507,12 +515,13 @@ WebSocket events → useWebSocket hook (auto snake↔camel conversion)
             → Charts update with new data points
 ```
 
-**State management** uses `useReducer` with five action types matching the five event types from the backend. The reducer builds a hierarchical tree structure from flat events — each round creates a branch, each draft token appends to the chain, and verification results update node colors and statuses.
+**State management** uses `useReducer` with five action types matching the five event types from the backend. The reducer builds a hierarchical tree structure from flat events — each round creates a branch, each draft token appends to the chain, and verification results update node colors and statuses. Dead state fields (`currentRound`, `error`, `finalStats`) have been removed; the reducer now tracks `acceptedTokens` incrementally and `finalGeneratedText` from the done event for authoritative text display.
 
 **Tree construction** handles several edge cases:
-- React StrictMode double-invocation (guarded by `findNode()` deduplication)
-- Bonus tokens without explicit positions (fall back to deepest node via `findDeepest()`)
-- Deep cloning via `structuredClone()` to prevent mutation across renders
+- React StrictMode double-invocation (guarded by `findNode()` deduplication in `lib/treeUtils.ts`)
+- Bonus tokens without explicit positions (fall back to deepest node via `findDeepest()` in `lib/treeUtils.ts`)
+- Surgical spine-copy via `cloneRootWithUpdate()` — only clones nodes on the path from root to the updated node, leaving all other subtrees shared with the previous state (replaces full `structuredClone()`)
+- Memoized `visibleTokens` filtering via `useMemo` to avoid recomputation on every render
 
 ---
 
@@ -527,9 +536,12 @@ visualize_speculative_decoding/
 │   ├── draft_model.py          # MLX-LM wrapper, local token generation
 │   ├── target_model.py         # Cerebras API client, batch verification
 │   ├── rejection_sampling.py   # Modified rejection sampling (Leviathan et al.)
+│   ├── interfaces.py           # Protocol definitions for dependency injection
 │   ├── metrics.py              # Rolling-window KPI tracker
 │   ├── schemas.py              # Pydantic event models + token status enum
-│   └── config.py               # Environment variable loading + validation
+│   ├── config.py               # Environment variable loading + lru_cache singleton
+│   └── tests/
+│       └── test_speculator.py  # Unit tests with stub models (no GPU required)
 │
 ├── frontend/                   # TypeScript — React 19 + Vite
 │   └── src/
@@ -541,7 +553,7 @@ visualize_speculative_decoding/
 │       ├── components/
 │       │   ├── Layout.tsx       # 2×2 grid, dark theme
 │       │   ├── PromptInput.tsx  # Input form with parameter sliders
-│       │   ├── TokenTree.tsx    # D3 force-directed token tree
+│       │   ├── TokenTree.tsx    # D3 hierarchical token tree
 │       │   ├── TextOutput.tsx   # Color-coded streaming text
 │       │   ├── KPIDashboard.tsx # 2×2 metrics grid container
 │       │   ├── AcceptanceGauge.tsx   # Donut chart
@@ -550,7 +562,10 @@ visualize_speculative_decoding/
 │       │   └── LatencyChart.tsx # Stacked bar latency breakdown
 │       └── lib/
 │           ├── colors.ts        # Consistent color palette + mapping functions
-│           └── treeLayout.ts    # D3 tree layout computation
+│           ├── treeLayout.ts    # D3 tree layout computation
+│           ├── camelCase.ts     # Snake→camelCase recursive converter
+│           ├── styles.ts        # Shared CSS-in-JS constants for charts
+│           └── treeUtils.ts     # Tree traversal helpers (findNode, findDeepest)
 │
 ├── .env.example                # Environment variable template
 ├── requirements.txt            # Python dependencies
@@ -652,7 +667,8 @@ The frontend and backend communicate via a structured JSON event protocol over W
 | **Target model** | API error handling | HTTP errors caught and reported; timeout handling |
 | **Frontend state** | StrictMode guards | Deduplication prevents double-processing in development mode |
 | **Tokenizer** | Token ID tracking | Eliminates drift from string concatenation across rounds |
-| **EOS detection** | Multi-token check | Detects Llama (`<\|eot_id\|>`, `<\|end_of_text\|>`, `</s>`) and Harmony (`<\|return\|>`, `<\|end\|>`, `<\|call\|>`) stop tokens |
+| **EOS detection** | Configurable tokens | `Settings.eos_tokens` list (default: Llama + Harmony stop tokens); extensible for new model families |
+| **Testing** | Protocol-based DI | `DraftModelProtocol`/`TargetModelProtocol` enable unit tests with stub models — no GPU/MLX required |
 
 ---
 
