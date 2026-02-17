@@ -34,7 +34,7 @@ npm run lint     # ESLint
 ### Environment
 ```bash
 cp .env.example .env
-# Required: CEREBRAS_API_KEY, CEREBRAS_TARGET_MODEL (e.g. llama-3.3-70b)
+# Required: CEREBRAS_API_KEY, CEREBRAS_TARGET_MODEL (e.g. gpt-oss-120b)
 # Optional: DRAFT_MODEL, SPECULATION_K, TEMPERATURE, MAX_TOKENS
 ```
 
@@ -45,7 +45,7 @@ cp .env.example .env
 - **`main.py`** — App entry, WebSocket `/ws/tokens`, health check `/api/health`. Draft model loaded as singleton at startup.
 - **`speculator.py`** — Orchestrator: runs the draft→verify→rejection-sampling loop, emits events via WebSocket. Maintains `generated_text_so_far` as concatenated token text and `token_ids` to avoid tokenizer drift.
 - **`draft_model.py`** — Wraps MLX-LM `generate_step` for local draft token generation with logprobs. Uses `mx.eval` for lazy evaluation. Provides `get_prompt_text()` to extract raw chat template text for the completions endpoint.
-- **`target_model.py`** — Calls Cerebras `/v1/completions` endpoint (not chat) with raw prompt text. Returns per-position logprobs and entropy for K+1 tokens. Uses `logprobs=20` parameter.
+- **`target_model.py`** — Calls Cerebras `/v1/completions` endpoint with the target model's native prompt format (Harmony for GPT-OSS, raw text for others). Returns per-position logprobs and entropy for K+1 tokens. Uses `logprobs=20` parameter.
 - **`rejection_sampling.py`** — Implements modified rejection sampling (Leviathan et al. 2023). Accepts/rejects draft tokens by comparing draft vs target log-probability distributions. Handles resampling and bonus token generation.
 - **`metrics.py`** — Rolling-window (50 rounds) KPIs: acceptance rate, TPS, speedup, latency breakdown.
 - **`schemas.py`** — Pydantic event models: `DraftTokenEvent`, `VerifyResultEvent`, `MetricsEvent`, `GenerationDoneEvent`, `ErrorEvent`. Token statuses: pending, accepted, rejected, resampled, bonus.
@@ -70,7 +70,7 @@ User prompt → WebSocket → Speculator
 
 ## Key Design Decisions
 
-- **Completions API, not Chat API**: Cerebras doesn't support assistant message prefilling. The target model uses `/v1/completions` with raw prompt text concatenation for reliable continuation.
+- **Model-native prompt formatting**: The target model formats verification prompts in its own native template (Harmony for GPT-OSS, raw text for others) via the Completions API. This avoids prompt format mismatches when draft and target use different model families/tokenizers.
 - **Token ID tracking**: Text is reconstructed from accumulated token IDs (`self._tokenizer.decode(self.token_ids)`) rather than string concatenation, avoiding tokenizer drift.
 - **Log-softmax normalization**: Draft model logprobs are normalized via `mx.softmax` → `mx.log` since raw logits from `generate_step` aren't log-probabilities.
 - **Singleton draft model**: MLX model loaded once at FastAPI startup via `@asynccontextmanager` lifespan, shared across requests.

@@ -38,20 +38,36 @@ class TargetModel:
             api_key=api_key,
         )
 
+    def _build_prompt(self, prompt: str, generated_text: str) -> str:
+        """Build the verification prompt in the target model's native format.
+
+        GPT-OSS models use the Harmony chat template format. Other models
+        fall back to a simple text continuation format.
+        """
+        if "gpt-oss" in self.model.lower():
+            # Harmony format: skip analysis channel, go straight to final response
+            text = f"<|start|>user<|message|>{prompt}<|end|>\n"
+            text += f"<|start|>assistant<|channel|>final<|message|>{generated_text}"
+            return text
+        else:
+            # Generic format for other models (Qwen, Llama, etc.)
+            # Just send raw text for continuation
+            return f"{prompt}\n\n{generated_text}"
+
     async def verify_tokens(
         self,
-        prompt_text: str,
+        prompt: str,
+        generated_text: str,
         k: int,
     ) -> VerificationResult:
         """Verify draft tokens by generating K+1 tokens from the target model.
 
-        Uses the /v1/completions endpoint (not chat) to send the raw prompt
-        text including the chat template. This ensures the target model
-        continues from exactly the right position, avoiding issues with
-        assistant message prefilling not being supported.
+        Uses the /v1/completions endpoint with the target model's native
+        prompt format (Harmony for GPT-OSS, raw text for others).
 
         Args:
-            prompt_text: Full raw text (chat template + generated text so far).
+            prompt: The raw user prompt text.
+            generated_text: Text generated so far (empty string for round 1).
             k: Number of draft tokens to verify.
 
         Returns:
@@ -59,11 +75,13 @@ class TargetModel:
         """
         t0 = time.perf_counter()
 
-        logger.info(f"  TARGET prompt ends with: {repr(prompt_text[-80:])}")
+        full_prompt = self._build_prompt(prompt, generated_text)
+
+        logger.info(f"  TARGET prompt ends with: {repr(full_prompt[-80:])}")
 
         response = await self.client.completions.create(
             model=self.model,
-            prompt=prompt_text,
+            prompt=full_prompt,
             logprobs=20,
             max_tokens=k + 1,
             temperature=0.01,  # Near-greedy; Cerebras requires >0 with logprobs

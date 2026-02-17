@@ -43,7 +43,6 @@ class Speculator:
         # Build initial context
         logger.info("Applying chat template...")
         context_ids = self.draft.apply_chat_template(prompt)
-        prompt_text = self.draft.get_prompt_text(prompt)
         logger.info(f"Context has {len(context_ids)} tokens")
 
         generated_text_so_far = ""
@@ -103,11 +102,12 @@ class Speculator:
                     await asyncio.sleep(0.05)  # 50ms stagger for animation
 
                 # --- Phase 2: Verify via Cerebras API ---
-                # Use completions API with raw prompt text for reliable continuation
+                # Target model formats the prompt in its native template
+                # (Harmony for GPT-OSS, raw text for others)
                 logger.info(f"Round {current_round}: Verifying via Cerebras API...")
-                full_prompt_text = prompt_text + generated_text_so_far
                 verification = await self.target.verify_tokens(
-                    prompt_text=full_prompt_text,
+                    prompt=prompt,
+                    generated_text=generated_text_so_far,
                     k=k,
                 )
                 logger.info(
@@ -290,7 +290,14 @@ class Speculator:
                 # Check for EOS or stop condition
                 if any(
                     stop in generated_text_so_far
-                    for stop in ["<|eot_id|>", "<|end_of_text|>", "</s>"]
+                    for stop in [
+                        "<|eot_id|>",
+                        "<|end_of_text|>",
+                        "</s>",
+                        "<|return|>",
+                        "<|end|>",
+                        "<|call|>",
+                    ]
                 ):
                     logger.info(f"EOS detected after {current_round} rounds")
                     break

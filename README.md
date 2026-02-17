@@ -180,8 +180,8 @@ The better the draft model approximates the target, the higher the acceptance ra
 │                                       │  Apple Neural    │   │  Cerebras   │ │
 │                                       │  Engine          │───│  Cloud API  │ │
 │                                       │                  │   │             │ │
-│                                       │  Llama 3.2 3B    │   │  Llama 3.3  │ │
-│                                       │  4-bit quantized │   │  70B        │ │
+│                                       │  Llama 3.2 3B    │   │  GPT-OSS    │ │
+│                                       │  4-bit quantized │   │  120B       │ │
 │                                       │  ~1.8GB RAM      │   │  /v1/compl  │ │
 │                                       │  50-200 tok/s    │   │  1000+ t/s  │ │
 │                                       └─────────────────┘   └─────────────┘ │
@@ -220,7 +220,7 @@ User types prompt
     │   Append accepted/resampled/bonus token IDs to generated_token_ids
     │   Reconstruct generated_text from token IDs (avoids tokenizer drift)
     │   Emit VerifyResultEvent per token (80ms stagger)
-    │   Check for EOS tokens: <|eot_id|>, <|end_of_text|>, </s>
+    │   Check for EOS tokens (Llama + Harmony formats)
     │
     │── Phase 5: Metrics ─────────────────────────────────────────────────────
     │   Record RoundStats into MetricsTracker (50-round rolling window)
@@ -345,7 +345,7 @@ Open **http://localhost:5173**, type a prompt, and watch speculative decoding in
 ```bash
 # Check backend health
 curl http://localhost:8000/api/health
-# → {"status": "ok", "draft_model": "...", "target_model": "llama-3.3-70b", "draft_loaded": true}
+# → {"status": "ok", "draft_model": "...", "target_model": "gpt-oss-120b", "draft_loaded": true}
 
 # Test draft model independently
 curl http://localhost:8000/api/test-draft
@@ -361,7 +361,7 @@ All settings are managed via environment variables (`.env` file):
 ```env
 # ─── Required ─────────────────────────────────────────────────────
 CEREBRAS_API_KEY=your-api-key-here
-CEREBRAS_TARGET_MODEL=llama-3.3-70b
+CEREBRAS_TARGET_MODEL=gpt-oss-120b
 
 # ─── Speculation Parameters ───────────────────────────────────────
 DRAFT_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
@@ -374,16 +374,15 @@ MAX_TOKENS=512               # Max tokens to generate (1-4096)
 
 | Model | Parameters | Best For | Verification Speed |
 |-------|:----------:|----------|:------------------:|
-| `llama3.1-8b` | 8B | Fastest verification, quick demos | ⚡⚡⚡⚡ |
-| `llama-3.3-70b` | 70B | **Best quality/speed tradeoff** | ⚡⚡⚡ |
+| `gpt-oss-120b` | 120B | **Best quality/speed tradeoff** | ⚡⚡⚡ |
 | `qwen-3-32b` | 32B | Code generation, reasoning | ⚡⚡⚡ |
 
 ### Draft Model Options
 
 | Model | Params | Disk | RAM | Speed | Acceptance Rate | Best For |
 |-------|:------:|:----:|:---:|:-----:|:---------------:|----------|
-| `Llama-3.2-1B-Instruct-4bit` | 1B | 695MB | ~2GB | ⚡⚡⚡⚡ | ⭐⭐⭐ | Quick tests, 8GB Macs |
 | `Llama-3.2-3B-Instruct-4bit` | 3B | 1.8GB | ~4GB | ⚡⚡⚡ | ⭐⭐⭐⭐ | **Recommended default** |
+| `Llama-3.2-1B-Instruct-4bit` | 1B | 695MB | ~2GB | ⚡⚡⚡⚡ | ⭐⭐⭐ | Quick tests, 8GB Macs |
 | `Qwen2.5-3B-Instruct-4bit` | 3B | 1.7GB | ~4GB | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Code, reasoning tasks |
 
 All draft models use MLX 4-bit quantization and run on Apple's Neural Engine — no GPU required, no CUDA, no cloud costs for drafting.
@@ -653,7 +652,7 @@ The frontend and backend communicate via a structured JSON event protocol over W
 | **Target model** | API error handling | HTTP errors caught and reported; timeout handling |
 | **Frontend state** | StrictMode guards | Deduplication prevents double-processing in development mode |
 | **Tokenizer** | Token ID tracking | Eliminates drift from string concatenation across rounds |
-| **EOS detection** | Multi-token check | Detects `<\|eot_id\|>`, `<\|end_of_text\|>`, `</s>` across model families |
+| **EOS detection** | Multi-token check | Detects Llama (`<\|eot_id\|>`, `<\|end_of_text\|>`, `</s>`) and Harmony (`<\|return\|>`, `<\|end\|>`, `<\|call\|>`) stop tokens |
 
 ---
 

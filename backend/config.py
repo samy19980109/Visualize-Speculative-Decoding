@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # Required
     cerebras_api_key: str = Field(..., description="Cerebras Cloud API key")
     cerebras_target_model: str = Field(
-        ..., description="Target model on Cerebras (e.g. llama-3.3-70b)"
+        ..., description="Target model on Cerebras (e.g. gpt-oss-120b)"
     )
 
     # Draft model
