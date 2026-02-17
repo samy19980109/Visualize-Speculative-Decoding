@@ -5,13 +5,19 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
-from .config import settings
-
 logger = logging.getLogger(__name__)
+
+# Models that use Harmony chat template format
+_HARMONY_MODELS: frozenset[str] = frozenset({
+    "gpt-oss-120b",
+})
+
+_MAX_RETRIES = 3
+_TIMEOUT_S = 30.0
 
 
 @dataclass
@@ -36,6 +42,8 @@ class TargetModel:
         self.client = AsyncOpenAI(
             base_url="https://api.cerebras.ai/v1",
             api_key=api_key,
+            timeout=_TIMEOUT_S,
+            max_retries=_MAX_RETRIES,
         )
 
     def _build_prompt(self, prompt: str, generated_text: str) -> str:
@@ -44,7 +52,7 @@ class TargetModel:
         GPT-OSS models use the Harmony chat template format. Other models
         fall back to a simple text continuation format.
         """
-        if "gpt-oss" in self.model.lower():
+        if self.model.lower() in _HARMONY_MODELS:
             # Harmony format: skip analysis channel, go straight to final response
             text = f"<|start|>user<|message|>{prompt}<|end|>\n"
             text += f"<|start|>assistant<|channel|>final<|message|>{generated_text}"

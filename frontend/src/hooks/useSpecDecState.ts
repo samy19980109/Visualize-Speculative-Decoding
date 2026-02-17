@@ -1,4 +1,5 @@
-import { useReducer, useCallback } from 'react';
+import { useReducer, useCallback, useMemo } from 'react';
+import { findNode, findDeepest } from '../lib/treeUtils';
 import type {
   ServerEvent,
   TokenInfo,
@@ -9,29 +10,22 @@ import type {
 
 export interface SpecDecState {
   isGenerating: boolean;
-  generatedText: string;
   tokens: TokenInfo[];
   treeRoots: TreeNode[];
   metricsHistory: MetricsSnapshot[];
-  currentRound: number;
-  error: string | null;
-  finalStats: {
-    totalTokens: number;
-    totalRounds: number;
-    acceptanceRate: number;
-    speedup: number;
-  } | null;
+  // Incremental list of accepted token strings for text generation
+  acceptedTokens: { token: string; round: number; position: number }[];
+  // Final generated text from done event (authoritative)
+  finalGeneratedText: string | null;
 }
 
 const initialState: SpecDecState = {
   isGenerating: false,
-  generatedText: '',
   tokens: [],
   treeRoots: [],
   metricsHistory: [],
-  currentRound: 0,
-  error: null,
-  finalStats: null,
+  acceptedTokens: [],
+  finalGeneratedText: null,
 };
 
 type Action =
@@ -43,20 +37,27 @@ type Action =
   | { type: 'GENERATION_DONE'; event: ServerEvent & { type: 'done' } }
   | { type: 'ERROR'; event: ServerEvent & { type: 'error' } };
 
-/** Recursively find a node by round+position. */
-function findNode(node: TreeNode, round: number, position: number): TreeNode | null {
-  if (node.round === round && node.position === position) return node;
-  for (const child of node.children) {
-    const found = findNode(child, round, position);
-    if (found) return found;
+/**
+ * Surgical spine-copy: clone only the nodes on the path from root to the
+ * target node, leaving all other subtrees shared with the previous state.
+ */
+function cloneRootWithUpdate(
+  root: TreeNode,
+  round: number,
+  position: number,
+  updater: (node: TreeNode) => TreeNode
+): TreeNode {
+  if (root.round === round && root.position === position) {
+    return updater(root);
   }
-  return null;
-}
-
-/** Find the deepest node in the tree (rightmost leaf). */
-function findDeepest(node: TreeNode): TreeNode {
-  if (node.children.length === 0) return node;
-  return findDeepest(node.children[node.children.length - 1]);
+  const newChildren = root.children.map((child) => {
+    const found = findNode(child, round, position);
+    if (found) {
+      return cloneRootWithUpdate(child, round, position, updater);
+    }
+    return child; // unchanged subtree — no clone
+  });
+  return { ...root, children: newChildren };
 }
 
 function reducer(state: SpecDecState, action: Action): SpecDecState {
@@ -69,13 +70,26 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
 
     case 'DRAFT_TOKEN': {
       const e = action.event;
-      // Deep clone to avoid StrictMode double-invocation issues
-      const newRoots: TreeNode[] = structuredClone(state.treeRoots);
 
-      // Find or create round node
-      let roundNode = newRoots.find((r) => r.round === e.round);
-      if (!roundNode) {
-        roundNode = {
+      // Find existing round root or prepare to add new one
+      const existingRootIdx = state.treeRoots.findIndex((r) => r.round === e.round);
+
+      let newRoots: TreeNode[];
+
+      if (existingRootIdx === -1) {
+        // New round — create round node with draft as child
+        const draftNode: TreeNode = {
+          id: `r${e.round}-d${e.position}`,
+          token: e.token,
+          status: 'pending',
+          round: e.round,
+          position: e.position,
+          entropy: e.entropy,
+          logprob: e.logprob,
+          acceptanceProb: null,
+          children: [],
+        };
+        const roundNode: TreeNode = {
           id: `round-${e.round}`,
           token: `R${e.round}`,
           status: 'pending',
@@ -84,40 +98,52 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
           entropy: 0,
           logprob: 0,
           acceptanceProb: null,
+          children: e.position === 0 ? [draftNode] : [],
+        };
+        newRoots = [...state.treeRoots, roundNode];
+      } else {
+        const roundNode = state.treeRoots[existingRootIdx];
+
+        // StrictMode guard: check if node already exists
+        if (findNode(roundNode, e.round, e.position)) {
+          return state;
+        }
+
+        const draftNode: TreeNode = {
+          id: `r${e.round}-d${e.position}`,
+          token: e.token,
+          status: 'pending',
+          round: e.round,
+          position: e.position,
+          entropy: e.entropy,
+          logprob: e.logprob,
+          acceptanceProb: null,
           children: [],
         };
-        newRoots.push(roundNode);
-      }
 
-      // Check if node already exists (StrictMode guard)
-      if (findNode(roundNode, e.round, e.position)) {
-        return state;
-      }
-
-      const draftNode: TreeNode = {
-        id: `r${e.round}-d${e.position}`,
-        token: e.token,
-        status: 'pending',
-        round: e.round,
-        position: e.position,
-        entropy: e.entropy,
-        logprob: e.logprob,
-        acceptanceProb: null,
-        children: [],
-      };
-
-      // Build linear chain: position 0 → roundNode, else find parent recursively
-      if (e.position === 0) {
-        roundNode.children.push(draftNode);
-      } else {
-        const parent = findNode(roundNode, e.round, e.position - 1);
-        if (parent) {
-          parent.children.push(draftNode);
+        // Surgical update: clone spine to insertion point
+        let updatedRound: TreeNode;
+        if (e.position === 0) {
+          updatedRound = { ...roundNode, children: [...roundNode.children, draftNode] };
         } else {
-          // Fallback: append to deepest node
-          const deepest = findDeepest(roundNode);
-          deepest.children.push(draftNode);
+          const parent = findNode(roundNode, e.round, e.position - 1);
+          if (parent) {
+            updatedRound = cloneRootWithUpdate(roundNode, e.round, e.position - 1, (node) => ({
+              ...node,
+              children: [...node.children, draftNode],
+            }));
+          } else {
+            // Fallback: append to deepest
+            const deepest = findDeepest(roundNode);
+            updatedRound = cloneRootWithUpdate(roundNode, deepest.round, deepest.position, (node) => ({
+              ...node,
+              children: [...node.children, draftNode],
+            }));
+          }
         }
+
+        newRoots = [...state.treeRoots];
+        newRoots[existingRootIdx] = updatedRound;
       }
 
       const newToken: TokenInfo = {
@@ -134,20 +160,20 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
         ...state,
         treeRoots: newRoots,
         tokens: [...state.tokens, newToken],
-        currentRound: e.round,
       };
     }
 
     case 'VERIFY_RESULT': {
       const e = action.event;
-      const newRoots = structuredClone(state.treeRoots);
 
-      // For bonus tokens, add a new node
+      // Update tree
+      let newRoots: TreeNode[];
       if (e.status === 'bonus') {
-        const roundNode = newRoots.find((r) => r.round === e.round);
-        if (roundNode) {
+        const rootIdx = state.treeRoots.findIndex((r) => r.round === e.round);
+        if (rootIdx >= 0) {
+          const roundNode = state.treeRoots[rootIdx];
           const deepest = findDeepest(roundNode);
-          deepest.children.push({
+          const bonusNode: TreeNode = {
             id: `r${e.round}-bonus`,
             token: e.token,
             status: 'bonus',
@@ -157,24 +183,30 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
             logprob: 0,
             acceptanceProb: 1.0,
             children: [],
-          });
+          };
+          const updated = cloneRootWithUpdate(roundNode, deepest.round, deepest.position, (node) => ({
+            ...node,
+            children: [...node.children, bonusNode],
+          }));
+          newRoots = [...state.treeRoots];
+          newRoots[rootIdx] = updated;
+        } else {
+          newRoots = state.treeRoots;
         }
       } else {
-        // Update existing node status
-        for (const root of newRoots) {
+        // Update existing node status via surgical spine copy
+        newRoots = state.treeRoots.map((root) => {
           const node = findNode(root, e.round, e.position);
-          if (node) {
-            // Only update if this is a status progression (don't re-update with rejected after resampled)
-            if (node.status === 'pending' || e.status === 'resampled') {
-              node.status = e.status as TokenStatus;
-              node.acceptanceProb = e.acceptanceProb;
-              if (e.status === 'resampled') {
-                node.token = e.token;
-              }
-            }
-            break;
+          if (node && (node.status === 'pending' || e.status === 'resampled')) {
+            return cloneRootWithUpdate(root, e.round, e.position, (n) => ({
+              ...n,
+              status: e.status as TokenStatus,
+              acceptanceProb: e.acceptanceProb,
+              ...(e.status === 'resampled' ? { token: e.token } : {}),
+            }));
           }
-        }
+          return root;
+        });
       }
 
       // Update tokens list
@@ -187,10 +219,8 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
           ...newTokens[tokenIdx],
           status: e.status as TokenStatus,
           acceptanceProb: e.acceptanceProb,
+          ...(e.status === 'resampled' ? { token: e.token } : {}),
         };
-        if (e.status === 'resampled') {
-          newTokens[tokenIdx].token = e.token;
-        }
       } else if (e.status === 'bonus') {
         newTokens.push({
           token: e.token,
@@ -203,17 +233,17 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
         });
       }
 
-      // Build generated text from accepted/resampled/bonus tokens
-      const accepted = newTokens.filter((t) =>
-        ['accepted', 'resampled', 'bonus'].includes(t.status)
-      );
-      const generatedText = accepted.map((t) => t.token).join('');
+      // Incremental: append to accepted tokens list if this is a new acceptance
+      let newAccepted = state.acceptedTokens;
+      if (['accepted', 'resampled', 'bonus'].includes(e.status)) {
+        newAccepted = [...state.acceptedTokens, { token: e.token, round: e.round, position: e.position }];
+      }
 
       return {
         ...state,
         treeRoots: newRoots,
         tokens: newTokens,
-        generatedText,
+        acceptedTokens: newAccepted,
       };
     }
 
@@ -239,13 +269,7 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
       return {
         ...state,
         isGenerating: false,
-        generatedText: e.generatedText,
-        finalStats: {
-          totalTokens: e.totalTokens,
-          totalRounds: e.totalRounds,
-          acceptanceRate: e.finalAcceptanceRate,
-          speedup: e.averageSpeedup,
-        },
+        finalGeneratedText: e.generatedText,
       };
     }
 
@@ -253,7 +277,6 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
       return {
         ...state,
         isGenerating: false,
-        error: action.event.message,
       };
 
     default:
@@ -263,6 +286,12 @@ function reducer(state: SpecDecState, action: Action): SpecDecState {
 
 export function useSpecDecState() {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Derive generated text from incremental accepted tokens list
+  const generatedText = useMemo(() => {
+    if (state.finalGeneratedText !== null) return state.finalGeneratedText;
+    return state.acceptedTokens.map((t) => t.token).join('');
+  }, [state.acceptedTokens, state.finalGeneratedText]);
 
   const handleEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
@@ -292,5 +321,5 @@ export function useSpecDecState() {
     dispatch({ type: 'STOP_GENERATION' });
   }, []);
 
-  return { state, handleEvent, startGeneration, stopGeneration };
+  return { state, generatedText, handleEvent, startGeneration, stopGeneration };
 }

@@ -1,31 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { snakeToCamel } from '../lib/camelCase';
 import type { ServerEvent, StartGenerationRequest } from '../types';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
-
-// Convert snake_case keys to camelCase recursively
-function snakeToCamel(obj: unknown): unknown {
-  if (Array.isArray(obj)) {
-    return obj.map(snakeToCamel);
-  }
-  if (obj !== null && typeof obj === 'object') {
-    return Object.fromEntries(
-      Object.entries(obj as Record<string, unknown>).map(([key, val]) => [
-        key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
-        snakeToCamel(val),
-      ])
-    );
-  }
-  return obj;
-}
 
 export function useWebSocket(onEvent: (event: ServerEvent) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
+  const intentionallyClosedRef = useRef(false);
   const onEventRef = useRef(onEvent);
-  const connectRef = useRef<() => void>();
+  const connectRef = useRef<() => void>(undefined);
 
   const connect = useCallback(() => {
     // Don't connect if unmounted or already open/connecting
@@ -61,8 +47,10 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
       if (mountedRef.current) {
         setStatus('disconnected');
         wsRef.current = null;
-        // Auto-reconnect after 3s
-        reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 3000);
+        // Auto-reconnect after 3s, unless intentionally closed by user
+        if (!intentionallyClosedRef.current) {
+          reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 3000);
+        }
       }
     };
 
@@ -96,6 +84,7 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
   }, [connect]);
 
   const send = useCallback((request: StartGenerationRequest) => {
+    intentionallyClosedRef.current = false;
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       console.warn('WebSocket not connected');
       return;
@@ -113,13 +102,11 @@ export function useWebSocket(onEvent: (event: ServerEvent) => void) {
 
   const close = useCallback(() => {
     clearTimeout(reconnectTimeout.current);
+    intentionallyClosedRef.current = true;
     if (wsRef.current) {
-      // Don't null out onclose - let it reconnect after we close
       wsRef.current.close();
       wsRef.current = null;
       setStatus('disconnected');
-      // Trigger reconnect after a short delay
-      reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 1000);
     }
   }, []);
 

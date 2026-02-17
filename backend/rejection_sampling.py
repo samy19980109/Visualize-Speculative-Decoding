@@ -10,6 +10,23 @@ from .schemas import TokenStatus
 
 
 @dataclass
+class DraftInput:
+    """Typed input for a single draft token."""
+
+    token_str: str
+    token_id: int
+    logprob: float
+
+
+@dataclass
+class TargetInput:
+    """Typed input for a single target position."""
+
+    token_str: str
+    top_logprobs: dict[str, float]
+
+
+@dataclass
 class ComparisonResult:
     """Result of comparing a draft token against the target at one position."""
 
@@ -34,8 +51,8 @@ class RoundResult:
 
 
 def run_rejection_sampling(
-    draft_tokens: list[dict],  # [{token_str, token_id, logprob}, ...]
-    target_positions: list[dict],  # [{token_str, top_logprobs: {str: float}}, ...]
+    draft_tokens: list[DraftInput],
+    target_positions: list[TargetInput],
 ) -> RoundResult:
     """Run modified rejection sampling on one round of draft vs target.
 
@@ -60,10 +77,10 @@ def run_rejection_sampling(
             break
 
         target = target_positions[i]
-        draft_str = draft["token_str"]
-        draft_lp = draft["logprob"]
-        target_str = target["token_str"]
-        target_top_lps = target["top_logprobs"]
+        draft_str = draft.token_str
+        draft_lp = draft.logprob
+        target_str = target.token_str
+        target_top_lps = target.top_logprobs
 
         # Case 1: Exact match
         if draft_str == target_str:
@@ -73,7 +90,7 @@ def run_rejection_sampling(
                     status=TokenStatus.ACCEPTED,
                     draft_token=draft_str,
                     final_token=draft_str,
-                    final_token_id=draft["token_id"],
+                    final_token_id=draft.token_id,
                     draft_logprob=draft_lp,
                     target_logprob=target_top_lps.get(draft_str),
                     acceptance_prob=1.0,
@@ -94,7 +111,7 @@ def run_rejection_sampling(
                         status=TokenStatus.ACCEPTED,
                         draft_token=draft_str,
                         final_token=draft_str,
-                        final_token_id=draft["token_id"],
+                        final_token_id=draft.token_id,
                         draft_logprob=draft_lp,
                         target_logprob=target_lp,
                         acceptance_prob=acceptance_prob,
@@ -110,7 +127,7 @@ def run_rejection_sampling(
                         status=TokenStatus.REJECTED,
                         draft_token=draft_str,
                         final_token=target_str,
-                        final_token_id=draft["token_id"],
+                        final_token_id=None,  # REJECTED: draft token not used
                         draft_logprob=draft_lp,
                         target_logprob=target_lp,
                         acceptance_prob=acceptance_prob,
@@ -139,7 +156,7 @@ def run_rejection_sampling(
                     status=TokenStatus.REJECTED,
                     draft_token=draft_str,
                     final_token=target_str,
-                    final_token_id=draft["token_id"],
+                    final_token_id=None,  # REJECTED: draft token not used
                     draft_logprob=draft_lp,
                     target_logprob=None,
                     acceptance_prob=0.0,
@@ -164,7 +181,9 @@ def run_rejection_sampling(
         draft_tokens
     ):
         bonus_pos = target_positions[len(draft_tokens)]
-        bonus_token = bonus_pos["token_str"]
+        bonus_token = bonus_pos.token_str
+        # bonus_token_id is resolved by the caller via tokenization,
+        # since the Cerebras API does not return token IDs
         bonus_token_id = None
 
     return RoundResult(

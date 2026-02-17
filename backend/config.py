@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings
+from functools import lru_cache
+
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -23,8 +25,20 @@ class Settings(BaseSettings):
     # Server
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
+    cors_origins: list[str] = Field(
+        default=["http://localhost:5173", "http://localhost:3000"],
+        description="Allowed CORS origins",
+    )
+
+    # EOS tokens (used by speculator to detect end of generation)
+    eos_tokens: list[str] = Field(
+        default=["<|end|>", "<|eot_id|>", "</s>", "<|im_end|>"],
+        description="End-of-sequence token strings",
+    )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

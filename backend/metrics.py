@@ -14,6 +14,7 @@ class RoundStats:
     draft_latency_ms: float
     verify_latency_ms: float
     round_time_ms: float
+    k: int = 1  # number of draft tokens in this round
 
 
 class MetricsTracker:
@@ -64,12 +65,18 @@ class MetricsTracker:
         """Estimated baseline autoregressive TPS.
 
         In autoregressive mode, each token requires one full API call.
-        We estimate this from the average verify latency per token.
+        A verify call checks K+1 tokens at once, so autoregressive cost
+        per token is verify_latency / (k + 1).
         """
         if not self._window:
             return 0.0
-        avg_verify_ms = sum(r.verify_latency_ms for r in self._window) / len(self._window)
-        return 1000 / avg_verify_ms if avg_verify_ms > 0 else 0.0
+        # Each verify call processes k+1 positions; in autoregressive mode
+        # each token would take verify_latency_ms / (k+1)
+        total_ar_time_ms = sum(
+            r.verify_latency_ms / (r.k + 1) for r in self._window
+        )
+        total_ar_tokens = len(self._window)  # 1 token per "round" in AR mode
+        return (total_ar_tokens / total_ar_time_ms) * 1000 if total_ar_time_ms > 0 else 0.0
 
     def speedup(self) -> float:
         baseline = self.baseline_tps()

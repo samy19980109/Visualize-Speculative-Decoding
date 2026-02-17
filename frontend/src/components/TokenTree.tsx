@@ -1,10 +1,27 @@
 import { useRef, useMemo } from 'react';
 import { computeTreeLayout } from '../lib/treeLayout';
 import { STATUS_COLORS, entropyToRadius, acceptanceProbToOpacity } from '../lib/colors';
+import { sectionHeaderStyle } from '../lib/styles';
 import type { TreeNode } from '../types';
 
 interface TokenTreeProps {
   roots: TreeNode[];
+}
+
+function Legend() {
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      {Object.entries(STATUS_COLORS).map(([status, color]) => (
+        <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color }} />
+          <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{status}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+        <span style={{ fontSize: 11, color: '#64748b' }}>Size = entropy | Opacity = acceptance prob</span>
+      </div>
+    </div>
+  );
 }
 
 export function TokenTree({ roots }: TokenTreeProps) {
@@ -12,7 +29,6 @@ export function TokenTree({ roots }: TokenTreeProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
   const dimensions = useMemo(() => {
-    // Compute needed dimensions based on tree depth
     const maxDepth = roots.reduce((max, root) => {
       function depth(node: TreeNode): number {
         if (node.children.length === 0) return 1;
@@ -35,9 +51,7 @@ export function TokenTree({ roots }: TokenTreeProps) {
   if (roots.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: '#94a3b8', margin: 0, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Token Tree
-        </h2>
+        <h2 style={sectionHeaderStyle}>Token Tree</h2>
         <div style={{
           flex: 1,
           display: 'flex',
@@ -48,24 +62,14 @@ export function TokenTree({ roots }: TokenTreeProps) {
         }}>
           Tree visualization will appear during generation...
         </div>
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          {Object.entries(STATUS_COLORS).map(([status, color]) => (
-            <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color }} />
-              <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{status}</span>
-            </div>
-          ))}
-        </div>
+        <Legend />
       </div>
     );
   }
 
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
-      <h2 style={{ fontSize: 14, fontWeight: 600, color: '#94a3b8', margin: 0, textTransform: 'uppercase', letterSpacing: 1 }}>
-        Token Tree
-      </h2>
+      <h2 style={sectionHeaderStyle}>Token Tree</h2>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         <svg
@@ -154,18 +158,7 @@ export function TokenTree({ roots }: TokenTreeProps) {
         </svg>
       </div>
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {Object.entries(STATUS_COLORS).map(([status, color]) => (
-          <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color }} />
-            <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{status}</span>
-          </div>
-        ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
-          <span style={{ fontSize: 11, color: '#64748b' }}>Size = entropy | Opacity = acceptance prob</span>
-        </div>
-      </div>
+      <Legend />
     </div>
   );
 }

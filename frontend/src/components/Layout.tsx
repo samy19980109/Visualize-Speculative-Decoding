@@ -10,7 +10,9 @@ interface LayoutProps {
 export function Layout({ promptPanel, treePanel, textPanel, kpiPanel }: LayoutProps) {
   return (
     <div style={{
-      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh',
       backgroundColor: '#0f172a',
       color: '#e2e8f0',
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
@@ -22,6 +24,7 @@ export function Layout({ promptPanel, treePanel, textPanel, kpiPanel }: LayoutPr
         display: 'flex',
         alignItems: 'center',
         gap: 12,
+        flexShrink: 0,
       }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
           SpeculatoViz
@@ -37,7 +40,8 @@ export function Layout({ promptPanel, treePanel, textPanel, kpiPanel }: LayoutPr
         gridTemplateColumns: '380px 1fr',
         gridTemplateRows: '1fr 320px',
         gap: 1,
-        height: 'calc(100vh - 57px)',
+        flex: 1,
+        minHeight: 0,
         backgroundColor: '#1e293b',
       }}>
         {/* Top-left: Prompt input */}

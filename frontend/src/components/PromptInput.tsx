@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 
 interface PromptInputProps {
   onGenerate: (prompt: string, k: number, temperature: number, maxTokens: number) => void;
@@ -7,7 +7,7 @@ interface PromptInputProps {
   isConnected: boolean;
 }
 
-export function PromptInput({ onGenerate, onStop, isGenerating, isConnected }: PromptInputProps) {
+export const PromptInput = memo(function PromptInput({ onGenerate, onStop, isGenerating, isConnected }: PromptInputProps) {
   const [prompt, setPrompt] = useState('Explain how transformers work in machine learning.');
   const [k, setK] = useState(8);
   const [temperature, setTemperature] = useState(0.7);
@@ -144,4 +144,4 @@ export function PromptInput({ onGenerate, onStop, isGenerating, isConnected }: P
       )}
     </div>
   );
-}
+});

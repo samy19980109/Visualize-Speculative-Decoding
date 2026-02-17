@@ -28,9 +28,9 @@ class EventType(str, Enum):
 
 class StartGenerationRequest(BaseModel):
     prompt: str
-    max_tokens: int = 512
-    temperature: float = 0.7
-    k: int = 8
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    k: Optional[int] = None
 
 
 # --- Token info shared between events ---

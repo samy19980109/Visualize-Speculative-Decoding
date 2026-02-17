@@ -38,7 +38,6 @@ function App() {
       textPanel={
         <TextOutput
           tokens={state.tokens}
-          generatedText={state.generatedText}
           isGenerating={state.isGenerating}
         />
       }

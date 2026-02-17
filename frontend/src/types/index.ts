@@ -19,6 +19,17 @@ export interface TopToken {
   logprob: number;
 }
 
+/** Shared fields between TokenInfo and TreeNode. */
+export interface TokenBase {
+  token: string;
+  status: TokenStatus;
+  round: number;
+  position: number;
+  entropy: number;
+  logprob: number;
+  acceptanceProb: number | null;
+}
+
 // --- Events from server ---
 
 export interface DraftTokenEvent {
@@ -86,29 +97,14 @@ export type ServerEvent =
 
 // --- Tree nodes for D3 visualization ---
 
-export interface TreeNode {
+export interface TreeNode extends TokenBase {
   id: string;
-  token: string;
-  status: TokenStatus;
-  round: number;
-  position: number;
-  entropy: number;
-  logprob: number;
-  acceptanceProb: number | null;
   children: TreeNode[];
 }
 
 // --- App state ---
 
-export interface TokenInfo {
-  token: string;
-  status: TokenStatus;
-  round: number;
-  position: number;
-  logprob: number;
-  entropy: number;
-  acceptanceProb: number | null;
-}
+export interface TokenInfo extends TokenBase {}
 
 export interface MetricsSnapshot {
   round: number;
